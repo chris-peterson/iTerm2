@@ -20,9 +20,7 @@
     return YES;
 }
 
-- (void)mouseUp:(NSEvent *)event {
-    NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
-
+- (nullable NSURL *)urlAtPoint:(NSPoint)point {
     NSTextStorage *textStorage = [[NSTextStorage alloc] initWithAttributedString:self.attributedStringValue];
     NSTextContainer *textContainer = [[NSTextContainer alloc] initWithContainerSize:self.bounds.size];
     // Match how NSTextFieldCell lays out the text so the hit-tested character is
@@ -42,11 +40,17 @@
     NSInteger index = [layoutManager characterIndexForPoint:point inTextContainer:textContainer fractionOfDistanceBetweenInsertionPoints:nil];
     if (index >= 0 && index < self.attributedStringValue.length) {
         NSDictionary *attributes = [self.attributedStringValue attributesAtIndex:index effectiveRange:nil];
-        NSURL *url = attributes[NSLinkAttributeName];
-        if (url) {
-            [self openURL:url];
-            return;
-        }
+        return attributes[NSLinkAttributeName];
+    }
+    return nil;
+}
+
+- (void)mouseUp:(NSEvent *)event {
+    NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+    NSURL *url = [self urlAtPoint:point];
+    if (url) {
+        [self openURL:url];
+        return;
     }
     [super mouseUp:event];
 }

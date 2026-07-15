@@ -8,6 +8,7 @@
 #import "iTermStatusBarTextComponent.h"
 
 #import "DebugLogging.h"
+#import "iTermClickableTextField.h"
 #import "iTermStatusBarSetupKnobsViewController.h"
 #import "iTermTuple.h"
 #import "NSArray+iTerm.h"
@@ -61,7 +62,10 @@ NS_ASSUME_NONNULL_BEGIN
 }
 
 - (NSTextField *)newTextField {
-    NSTextField *textField = [[NSTextField alloc] initWithFrame:NSZeroRect];
+    // iTermClickableTextField opens the URL of the NSLinkAttributeName span
+    // under a click (STATUS-BAR markdown links, below); with no link attrs it
+    // behaves exactly like NSTextField, so it's safe for every text component.
+    NSTextField *textField = [[iTermClickableTextField alloc] initWithFrame:NSZeroRect];
     textField.font = [self font];
     textField.drawsBackground = NO;
     textField.bordered = NO;
@@ -111,6 +115,72 @@ NS_ASSUME_NONNULL_BEGIN
     return NO;
 }
 
+// Matches a markdown-style link `[display](url)`: a `[...]` immediately
+// followed by a `(...)`, where the display can't contain `]` and the url can't
+// contain `)`. Requiring `](` adjacent means incidental text like `[3] (main)`
+// never matches — a link is opt-in, written as the exact `[display](url)` form.
++ (NSRegularExpression *)it_linkRegex {
+    static NSRegularExpression *regex;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        regex = [NSRegularExpression regularExpressionWithPattern:@"\\[([^\\]]+)\\]\\(([^)]+)\\)"
+                                                          options:0
+                                                            error:nil];
+    });
+    return regex;
+}
+
+// Parse `[display](url)` spans into an attributed string: literal text takes
+// `color`/`font`, each link becomes its `display` text carrying
+// NSLinkAttributeName (which iTermClickableTextField opens on click) plus a
+// dotted underline. Returns nil when the string has no links, so callers with
+// none keep the plain stringValue path unchanged (STATUS-BAR markdown links).
+// A class method (color/font passed in) so the parse is unit-testable without a
+// live component; the instance wrapper below supplies the component's own.
++ (nullable NSAttributedString *)it_attributedStringWithLinksFromString:(NSString *)string
+                                                                  color:(NSColor *)color
+                                                                   font:(NSFont *)font {
+    if (string.length == 0) {
+        return nil;
+    }
+    NSArray<NSTextCheckingResult *> *matches =
+        [[self it_linkRegex] matchesInString:string options:0 range:NSMakeRange(0, string.length)];
+    if (matches.count == 0) {
+        return nil;
+    }
+    NSDictionary *base = @{ NSForegroundColorAttributeName: color ?: [NSColor labelColor],
+                            NSFontAttributeName: font ?: [NSFont systemFontOfSize:[NSFont systemFontSize]] };
+    NSMutableAttributedString *result = [[NSMutableAttributedString alloc] init];
+    NSUInteger cursor = 0;
+    for (NSTextCheckingResult *match in matches) {
+        const NSRange full = match.range;
+        if (full.location > cursor) {
+            NSString *literal = [string substringWithRange:NSMakeRange(cursor, full.location - cursor)];
+            [result appendAttributedString:[[NSAttributedString alloc] initWithString:literal attributes:base]];
+        }
+        NSString *display = [string substringWithRange:[match rangeAtIndex:1]];
+        NSURL *url = [NSURL URLWithString:[string substringWithRange:[match rangeAtIndex:2]]];
+        NSMutableDictionary *attrs = [base mutableCopy];
+        if (url) {
+            attrs[NSLinkAttributeName] = url;
+            attrs[NSUnderlineStyleAttributeName] = @(NSUnderlineStyleSingle | NSUnderlinePatternDot);
+        }
+        [result appendAttributedString:[[NSAttributedString alloc] initWithString:display attributes:attrs]];
+        cursor = NSMaxRange(full);
+    }
+    if (cursor < string.length) {
+        [result appendAttributedString:[[NSAttributedString alloc] initWithString:[string substringFromIndex:cursor]
+                                                                       attributes:base]];
+    }
+    return result;
+}
+
+- (nullable NSAttributedString *)it_attributedStringWithLinksFromString:(NSString *)string {
+    return [[self class] it_attributedStringWithLinksFromString:string
+                                                          color:self.textColor
+                                                           font:self.font];
+}
+
 - (BOOL)setValueInField:(NSTextField *)textField compressed:(BOOL)compressed {
     textField.textColor = self.textColor;
 
@@ -121,11 +191,18 @@ NS_ASSUME_NONNULL_BEGIN
         proposed = [self longestStringValue];
     }
 
-    if (![self shouldUpdateValue:proposed inField:textField]) {
-        return NO;
+    NSAttributedString *linked = [self it_attributedStringWithLinksFromString:proposed];
+    if (linked) {
+        // Links can't be diffed cheaply through stringValue (which drops the
+        // URLs), so set it every pass; the caller already gates how often this
+        // runs. shouldUpdateValue is the plain-text fast path below.
+        textField.attributedStringValue = linked;
+    } else {
+        if (![self shouldUpdateValue:proposed inField:textField]) {
+            return NO;
+        }
+        textField.stringValue = proposed ?: @"";
     }
-
-    textField.stringValue = proposed ?: @"";
 
     if (textField.alignment == NSTextAlignmentRight && textField.superview) {
         [self statusBarComponentSizeView:textField toFitWidth:textField.superview.bounds.size.width];
@@ -214,8 +291,15 @@ NS_ASSUME_NONNULL_BEGIN
     if (!_measuringField) {
         _measuringField = [self newTextField];
     }
-    _measuringField.stringValue = string;
-    _measuringField.textColor = self.textColor;
+    // Measure the rendered width — for a string with links that's the display
+    // text (markdown stripped), not the raw `[display](url)` source.
+    NSAttributedString *linked = [self it_attributedStringWithLinksFromString:string];
+    if (linked) {
+        _measuringField.attributedStringValue = linked;
+    } else {
+        _measuringField.stringValue = string;
+        _measuringField.textColor = self.textColor;
+    }
     [_measuringField sizeToFit];
     return [_measuringField frame].size.width;
 }

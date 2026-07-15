@@ -13,6 +13,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)openURL:(NSURL *)url;
 
+// URL of the link under `point` (view coordinates), or nil. Exposed so a
+// caller that intercepts the click itself can reuse the hit-test.
+- (nullable NSURL *)urlAtPoint:(NSPoint)point;
+
 @end
 
 NS_ASSUME_NONNULL_END
