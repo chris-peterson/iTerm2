@@ -23,6 +23,15 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSTextField *)newTextField;
 - (nullable NSString *)stringValueForCurrentWidth;
 
+// Parse `[display](url)` markdown into an attributed string with clickable
+// NSLinkAttributeName link spans (STATUS-BAR markdown links); literal text and
+// each link's display text take `color`/`font`. nil when there are no links.
+// A class method so the parse is unit-testable without a live component.
++ (nullable NSAttributedString *)it_attributedStringWithLinksFromString:(NSString *)string
+                                                                  color:(NSColor *)color
+                                                                   font:(NSFont *)font
+    NS_SWIFT_NAME(attributedStringWithMarkdownLinks(from:color:font:));
+
 @end
 
 NS_ASSUME_NONNULL_END

@@ -7,6 +7,7 @@
 
 #import "iTermStatusBarSwiftyStringComponent.h"
 
+#import "iTermClickableTextField.h"
 #import "iTermScriptHistory.h"
 #import "iTermStatusBarComponentKnob.h"
 #import "iTermVariableScope.h"
@@ -90,7 +91,18 @@ NSString *const iTermStatusBarSwiftyStringComponentExpressionKey = @"expression"
     return textField;
 }
 
-- (void)onClick:(id)sender {
+- (void)onClick:(NSClickGestureRecognizer *)sender {
+    // This gesture recognizer swallows -mouseUp:, so iTermClickableTextField's
+    // own link handling never fires here — do the same hit-test ourselves and
+    // open the URL under the click, falling through to the error only on a miss.
+    NSView *field = sender.view;
+    if ([field isKindOfClass:[iTermClickableTextField class]]) {
+        NSURL *url = [(iTermClickableTextField *)field urlAtPoint:[sender locationInView:field]];
+        if (url) {
+            [(iTermClickableTextField *)field openURL:url];
+            return;
+        }
+    }
     if (_errorReason) {
         [iTermWarning showWarningWithTitle:_errorReason
                                    actions:@[ @"OK" ]
